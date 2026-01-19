@@ -4,8 +4,11 @@ use std::io::{Read, Write};
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use std::time::Instant;
+use crate::models::RedisValue;
 
 mod respparser;
+mod models;
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -15,12 +18,12 @@ fn main() {
     
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
-    let env_variables = Arc::new(Mutex::new(HashMap::new()));
+    let store = Arc::new(Mutex::new(HashMap::new()));
     
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let kv_store = Arc::clone(&env_variables);
+                let kv_store = Arc::clone(&store);
                 thread::spawn(move || { 
                     handle_client(stream, kv_store);
                 });
@@ -30,7 +33,7 @@ fn main() {
     }
 }
 
-fn handle_client(mut stream: std::net::TcpStream, kv_store: Arc<Mutex<HashMap<String, String>>>) {
+fn handle_client(mut stream: std::net::TcpStream, kv_store: Arc<Mutex<HashMap<String, RedisValue>>>) {
     let mut buffer = [0; 512];
     
     loop {
