@@ -1,25 +1,34 @@
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
+use std::collections::{VecDeque, HashMap};
 use std::time::{Instant, Duration};
+use tokio::sync::mpsc;
 
 use crate::models::{ListDir, RedisData, RedisValue};
 
 type RespResult = Result<Vec<u8>, String>;
 
-pub fn parse_resp(buffer: &mut [u8], bytes_read: usize, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> Vec<u8> {
+pub async fn parse_resp(
+    buffer: &mut [u8], 
+    bytes_read: usize, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
+    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>
+) -> Vec<u8> {
+
     let data =  String::from_utf8_lossy(&buffer[..bytes_read]);
     let parts: Vec<&str> = data.lines().collect();
+    println!("DEBUG: Received parts: {:?}", parts);
 
     let result = match parts[2].to_uppercase().as_str() {
         "PING" => process_ping(),
         "ECHO" => process_echo(&parts),
         "SET" => process_set(&parts, &kv_store),
         "GET" => process_get(&parts, &kv_store),
-        "RPUSH" => process_push(&parts, &kv_store, ListDir::R),
+        "RPUSH" => process_push(&parts, &kv_store, &waiting_room, ListDir::R),
         "LRANGE" => process_lrange(&parts, &kv_store),
-        "LPUSH" => process_push(&parts, &kv_store, ListDir::L),
+        "LPUSH" => process_push(&parts, &kv_store, &waiting_room, ListDir::L),
         "LLEN" => process_llen(&parts, &kv_store),
         "LPOP" => process_pop(&parts, &kv_store, ListDir::L),
+        "BLPOP" => process_blpop(&parts, &kv_store, &waiting_room).await,
         _ => Err("Not supported".to_string()),
     };
     match result {
@@ -35,14 +44,19 @@ fn process_ping() -> RespResult {
     Ok(encode_simple_string("PONG"))
 }
 
-fn process_echo(parts: &Vec<&str>) -> RespResult {
+fn process_echo(
+    parts: &Vec<&str>
+) -> RespResult {
     match parts.len() {
         5 => Ok(encode_bulk_string(parts[4])),
         _ => Err("Error, echo command must be of length 5".to_string())
     }   
 }
 
-fn process_set(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+fn process_set(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> RespResult {
     if parts.len() < 7 {
         return Err("Incomplete SET command".to_string());
     }
@@ -68,7 +82,10 @@ fn process_set(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
     Ok(encode_simple_string("OK"))
 }
 
-fn process_get(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+fn process_get(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> RespResult {
     if parts.len() < 5 {
         return Err("Malformed GET".to_string());
     }
@@ -99,7 +116,12 @@ fn process_get(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
     }
 }
 
-fn process_push(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, push_type: ListDir) -> RespResult {
+fn process_push(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, 
+    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>, 
+    push_type: ListDir
+) -> RespResult {
     if parts.len() < 7 {
         return Err("Incomplete RPUSH/LPUSH command".to_string());
     }
@@ -113,25 +135,57 @@ fn process_push(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisVal
         .collect();
 
     // Get existing list from map or initialize to empty
-    let entry = map.entry(key).or_insert(RedisValue::new(
+    let entry = map.entry(key.clone()).or_insert(RedisValue::new(
         RedisData::List(Vec::new()), 
         None
     ));
 
     match &mut entry.data {
         RedisData::List(list) => {
-            match push_type {
-                ListDir::L => { list.splice(0..0, new_elements.into_iter().rev()); },
-                ListDir::R => { list.extend(new_elements); },
-            };
-            // list.extend(new_elements);
-            Ok(encode_integer(list.len())) 
+            let mut room = waiting_room.lock().unwrap();
+            let total_new_elements = new_elements.len(); 
+            // We use into_iter because we want to consume the elements
+            let mut remaining_elements = new_elements.into_iter();
+            if let Some(queue) = room.get_mut(&key) {
+                println!("DEBUG: PUSH found {} waiters for {}", queue.len(), key);
+                while let Some(tx) = queue.front() {
+                    // If we ran out of new elements to give, stop waking people up
+                    let Some(next_val) = remaining_elements.next() else { println!("DEBUG: PUSH ran out of elements for waiters");break; };
+                    if tx.try_send(next_val).is_ok() {
+                        println!("DEBUG: PUSH successfully handed off element");
+                        queue.pop_front(); 
+                    } else {
+                        println!("DEBUG: PUSH found a dead waiter (receiver dropped)");
+                        // Receiver is dead, remove this sender and try the next person in line
+                        queue.pop_front();
+                    }
+                }
+            } else {
+                println!("DEBUG: PUSH found NO waiters in room for {}", key);
+            }
+            let leftovers: Vec<String> = remaining_elements.collect();
+            let leftovers_count = leftovers.len();
+            if !leftovers.is_empty() {
+                match push_type {
+                    ListDir::L => { list.splice(0..0, leftovers.into_iter().rev()); },
+                    ListDir::R => { list.extend(leftovers); },
+                };
+            }
+            // REDIS SPEC: Return the length after the operation.
+            // If the list was empty (0) and we pushed 1 (raspberry), 
+            // even if raspberry was popped immediately, the result of PUSH is 1.
+            
+            let final_len = list.len() + (total_new_elements - leftovers_count);
+            Ok(encode_integer(final_len)) 
         },
         _ => Err("WRONGTYPE Operation against a key that is not a list".to_string())
     }
 }
 
-fn process_lrange(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+fn process_lrange(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> RespResult {
     if parts.len() < 9 {
         return Err("Incomplete LRANGE command".to_string());
     }
@@ -171,7 +225,10 @@ fn process_lrange(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisV
     }
 }
 
-fn process_llen(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+fn process_llen(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> RespResult {
     if parts.len() < 5 {
         return Err("Incomplete LRANGE command".to_string());
     }
@@ -188,7 +245,11 @@ fn process_llen(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisVal
     }
 }
 
-fn process_pop(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, push_type: ListDir) -> RespResult {
+fn process_pop(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, 
+    push_type: ListDir
+) -> RespResult {
     if parts.len() < 5 {
         return Err("Incomplete RPOP/LPOP command".to_string());
     }
@@ -239,11 +300,69 @@ fn process_pop(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
     response
 }
 
-fn encode_simple_string(s: &str) -> Vec<u8> {
+async fn process_blpop(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, 
+    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>
+) -> RespResult {
+    if parts.len() < 7 {
+        return Err("Incomplete LBPOP command".to_string());
+    }
+
+    let key = parts[4].to_string();
+    println!("DEBUG: LBPOP checking kv_store for {}", key);
+    let timeout_val: u64 = parts[parts.len() - 1].parse().unwrap_or(0);
+
+    // If exists just return, after check we want to remove the lock
+    {
+        let mut map = kv_store.lock().unwrap();
+        if let Some(val) = map.get_mut(&key) {
+            if let RedisData::List(list) = &mut val.data {
+                if !list.is_empty() {
+                    let item = list.remove(0);
+                    return Ok(encode_array(&[key, item]));
+                }
+            }
+        }
+    }
+    println!("DEBUG: LBPOP blocking on key: {}", key);
+
+    // List empty/didn't exist, block
+    let (tx, mut rx) = mpsc::channel(1);
+    {
+        let mut room = waiting_room.lock().unwrap();
+        room.entry(key.clone()).or_default().push_back(tx);
+        println!("DEBUG: Waiter added to room. Current queue size for {}: {}", 
+                 key, room.get(&key).unwrap().len());
+    }
+
+    let result = if timeout_val > 0 {
+        match tokio::time::timeout(tokio::time::Duration::from_secs(timeout_val), rx.recv()).await {
+            Ok(maybe_data) => maybe_data, // Success or channel closed
+            Err(_) => None,               // Timeout
+        }
+    } else {
+        rx.recv().await
+    };
+
+    match result {
+        Some(data) => {
+            println!("DEBUG: LBPOP Woke up! Received: {}", data);
+            Ok(encode_array(&[key, data]))
+        },
+        None => Ok(encode_null_array()), // Timeout or PUSH closed the channel
+    }
+}
+
+fn encode_simple_string(
+    s: &str
+) -> Vec<u8> {
     format!("+{}\r\n", s).into_bytes()
 }
 
-fn encode_bulk_string(s: &str) -> Vec<u8> {
+fn encode_bulk_string(
+    s: &str
+) -> Vec<u8> {
     format!("${}\r\n{}\r\n", s.len(), s).into_bytes()
 }
 
@@ -251,12 +370,20 @@ fn encode_null_string() -> Vec<u8> {
     "$-1\r\n".as_bytes().to_vec()
 }
 
-fn encode_integer(n: usize) -> Vec<u8> {
+fn encode_integer(
+    n: usize
+) -> Vec<u8> {
     format!(":{}\r\n", n).into_bytes()
 }
 
-fn encode_array(arr: &[String]) -> Vec<u8> {
+fn encode_array(
+    arr: &[String]
+) -> Vec<u8> {
     let mut bytes = format!("*{}\r\n", arr.len()).into_bytes();
     bytes.extend(arr.iter().flat_map(|s| encode_bulk_string(s)));
     bytes
+}
+
+fn encode_null_array() -> Vec<u8> {
+    "*-1\r\n".as_bytes().to_vec()
 }

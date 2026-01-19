@@ -1,43 +1,48 @@
 #![allow(unused_imports)]
-use std::net::TcpListener;
-use std::io::{Read, Write};
+use tokio::net::{TcpListener, TcpStream}; // Use tokio networking
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::thread;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
+use tokio::sync::mpsc;
 use crate::models::RedisValue;
 
 mod respparser;
 mod models;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
     // Uncomment the code below to pass the first stage
     
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
 
     let store = Arc::new(Mutex::new(HashMap::new()));
+    let waiting_room: Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>> = Arc::new(Mutex::new(HashMap::new()));
     
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
                 let kv_store = Arc::clone(&store);
-                thread::spawn(move || { 
-                    handle_client(stream, kv_store);
+                let room_clone = Arc::clone(&waiting_room);
+                tokio::spawn(async move { 
+                    handle_client(stream, kv_store, room_clone).await;
                 });
-            }
+            },
             Err(e) => eprintln!("Connection error: {}", e)
         }
     }
 }
 
-fn handle_client(mut stream: std::net::TcpStream, kv_store: Arc<Mutex<HashMap<String, RedisValue>>>) {
+async fn handle_client(mut stream: tokio::net::TcpStream, kv_store: Arc<Mutex<HashMap<String, RedisValue>>>, 
+                    waiting_room: Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>) {
     let mut buffer = [0; 512];
     
     loop {
-        match stream.read(&mut buffer) {
+        match stream.read(&mut buffer).await {
             Ok(0) => {
                 // Client disconnected (EOF)
                 println!("Client disconnected");
@@ -45,8 +50,8 @@ fn handle_client(mut stream: std::net::TcpStream, kv_store: Arc<Mutex<HashMap<St
             }
             Ok(bytes_read) => {
                 println!("Received {} bytes", bytes_read);
-                let parsed_bytes = respparser::parse_resp(&mut buffer, bytes_read, &kv_store);
-                if let Err(e) = stream.write_all(&parsed_bytes) {
+                let parsed_bytes = respparser::parse_resp(&mut buffer, bytes_read, &kv_store, &waiting_room).await;
+                if let Err(e) = stream.write_all(&parsed_bytes).await {
                     eprintln!("Failed to write: {}", e);
                     break;
                 }
