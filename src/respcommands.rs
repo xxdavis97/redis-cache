@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::collections::{VecDeque, HashMap};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
 use crate::models::{ListDir, RedisData, RedisValue, StreamEntry};
@@ -429,7 +429,23 @@ fn valid_entity_id(stream: &Vec<StreamEntry>, entity_id: &str) -> bool {
 
 fn parse_entity_id(entity_id: &str) -> (u64, u64){
     let parts: Vec<&str> = entity_id.split('-').collect();
-    let ms = parts[0].parse::<u64>().unwrap_or(0);
-    let seq = parts[1].parse::<u64>().unwrap_or(0);
+    let ms = if parts[0] == "*" {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_millis() as u64 // Cast u128 to u64
+    } else {
+        parts[0].parse::<u64>().unwrap_or(0)
+    };
+    let seq = if parts.len() > 1 {
+        if parts[1] == "*" {
+            // We will need special logic for sequence auto-generation later!
+            0 
+        } else {
+            parts[1].parse::<u64>().unwrap_or(0)
+        }
+    } else {
+        0
+    };
     (ms, seq)
 }
