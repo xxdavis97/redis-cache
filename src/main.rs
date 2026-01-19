@@ -23,6 +23,7 @@ fn main() {
         }
     }
 }
+
 fn handle_client(mut stream: std::net::TcpStream) {
     let mut buffer = [0; 512];
     
@@ -35,7 +36,8 @@ fn handle_client(mut stream: std::net::TcpStream) {
             }
             Ok(bytes_read) => {
                 println!("Received {} bytes", bytes_read);
-                if let Err(e) = stream.write_all(b"+PONG\r\n") {
+                let parsed_bytes = parse_resp(&mut buffer, bytes_read);
+                if let Err(e) = stream.write_all(&parsed_bytes) {
                     eprintln!("Failed to write: {}", e);
                     break;
                 }
@@ -46,4 +48,33 @@ fn handle_client(mut stream: std::net::TcpStream) {
             }
         }
     }
+}
+
+fn parse_resp(buffer: &mut [u8], bytes_read: usize) -> Vec<u8> {
+    let data =  String::from_utf8_lossy(&buffer[..bytes_read]);
+    let parts: Vec<&str> = data.lines().collect();
+    let command = parts[2].to_uppercase();
+    match parts[2].to_uppercase().as_str() {
+        "PING" => encode_simple_string("PONG"),
+        "ECHO" => {
+            if parts.len() != 5 {
+                eprintln!("Error, echo command must be of length 5");
+                vec![]
+            } else {
+                encode_bulk_string(parts[4])
+            }
+        },
+        _ => {
+            eprintln!("Not supported resp command");
+            vec![]
+        }
+    }
+}
+
+fn encode_simple_string(s: &str) -> Vec<u8> {
+    format!("+{}\r\n", s).into_bytes()
+}
+
+fn encode_bulk_string(s: &str) -> Vec<u8> {
+    format!("${}\r\n{}\r\n", s.len(), s).into_bytes()
 }
