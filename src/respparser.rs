@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
 
-use crate::models::RedisValue;
+use crate::models::{RedisData, RedisValue};
 
 type RespResult = Result<Vec<u8>, String>;
 
@@ -15,6 +15,7 @@ pub fn parse_resp(buffer: &mut [u8], bytes_read: usize, kv_store: &Arc<Mutex<Has
         "ECHO" => process_echo(&parts),
         "SET" => process_set(&parts, &kv_store),
         "GET" => process_get(&parts, &kv_store),
+        "RPUSH" => process_rpush(&parts, &kv_store),
         _ => Err("Not supported".to_string()),
     };
     match result {
@@ -58,7 +59,7 @@ fn process_set(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
 
     // 2. Commit the change once
     let mut map = kv_store.lock().unwrap();
-    map.insert(key, RedisValue::new(value, expires_at));
+    map.insert(key, RedisValue::new(RedisData::String(value), expires_at));
     
     Ok(encode_simple_string("OK"))
 }
@@ -87,9 +88,39 @@ fn process_get(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
         Ok(encode_null_string())
     } else {
         let val = map.get(&key).unwrap();
-        Ok(encode_bulk_string(&val.data))
+        match &val.data {
+            RedisData::String(s) => Ok(encode_bulk_string(s)),
+            _ => Err("WRONGTYPE Operation against a key not holding a string".to_string()),
+        }
     }
+}
 
+fn process_rpush(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+    if parts.len() < 7 {
+        return Err("Incomplete RPUSH command".to_string());
+    }
+    let key = parts[4].to_string();
+    let mut map = kv_store.lock().unwrap();
+
+    let new_elements: Vec<String> = parts[6..] // RPUSH can take multiple values
+        .iter()
+        .step_by(2) // Skip the RESP length lines
+        .map(|s| s.to_string())
+        .collect();
+
+    // Get existing list from map or initialize to empty
+    let entry = map.entry(key).or_insert(RedisValue::new(
+        RedisData::List(Vec::new()), 
+        None
+    ));
+
+    match &mut entry.data {
+        RedisData::List(list) => {
+            list.extend(new_elements);
+            Ok(encode_integer(list.len())) // RPUSH returns the new length
+        },
+        _ => Err("WRONGTYPE Operation against a key that is not a list".to_string())
+    }
 }
 
 fn encode_simple_string(s: &str) -> Vec<u8> {
@@ -102,4 +133,8 @@ fn encode_bulk_string(s: &str) -> Vec<u8> {
 
 fn encode_null_string() -> Vec<u8> {
     "$-1\r\n".as_bytes().to_vec()
+}
+
+fn encode_integer(n: usize) -> Vec<u8> {
+    format!(":{}\r\n", n).into_bytes()
 }
