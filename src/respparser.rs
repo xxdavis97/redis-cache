@@ -16,6 +16,7 @@ pub fn parse_resp(buffer: &mut [u8], bytes_read: usize, kv_store: &Arc<Mutex<Has
         "SET" => process_set(&parts, &kv_store),
         "GET" => process_get(&parts, &kv_store),
         "RPUSH" => process_rpush(&parts, &kv_store),
+        "LRANGE" => process_lrange(&parts, &kv_store),
         _ => Err("Not supported".to_string()),
     };
     match result {
@@ -123,6 +124,38 @@ fn process_rpush(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisVa
     }
 }
 
+fn process_lrange(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+    if parts.len() < 9 {
+        return Err("Incomplete LRANGE command".to_string());
+    }
+    let key = parts[4].to_string();
+    let start: i64 = parts[6].parse().map_err(|_| "Invalid start index")?;
+    let end: i64 = parts[8].parse().map_err(|_| "Invalid end index")?;
+
+    let map = kv_store.lock().unwrap();
+    match map.get(&key) {
+        Some(value) => {
+            match &value.data {
+                RedisData::List(list) => {
+                    let start_idx = start.max(0) as usize;
+                    let mut end_idx = end.max(0) as usize;
+
+                    if start_idx >= list.len() {
+                        return Ok(encode_array(&[]));
+                    }
+                    end_idx = (end_idx + 1).min(list.len());
+                    if start_idx >= end_idx {
+                        return Ok(encode_array(&[]));
+                    }
+                    Ok(encode_array(&list[start_idx..end_idx]))
+                },
+                _ => Err("WRONGTYPE Operation against a key holding a string".to_string()),
+            }
+        },
+        None => Ok(encode_array(&[]))
+    }
+}
+
 fn encode_simple_string(s: &str) -> Vec<u8> {
     format!("+{}\r\n", s).into_bytes()
 }
@@ -137,4 +170,10 @@ fn encode_null_string() -> Vec<u8> {
 
 fn encode_integer(n: usize) -> Vec<u8> {
     format!(":{}\r\n", n).into_bytes()
+}
+
+fn encode_array(arr: &[String]) -> Vec<u8> {
+    let mut bytes = format!("*{}\r\n", arr.len()).into_bytes();
+    bytes.extend(arr.iter().flat_map(|s| encode_bulk_string(s)));
+    bytes
 }
