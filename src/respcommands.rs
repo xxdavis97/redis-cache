@@ -375,6 +375,12 @@ pub fn process_xadd(
     let key = parts[4].to_string();
     let entity_id = parts[6].to_string();
 
+    let (new_ms, new_seq) = parse_entity_id(&entity_id);
+
+    if new_ms == 0 && new_seq == 0 {
+        return Ok("-ERR The ID specified in XADD must be greater than 0-0\r\n".as_bytes().to_vec());
+}
+
     let map_elements: HashMap<String, String> = parts[8..]
         .iter()
         .step_by(2) // Skip the RESP length lines
@@ -384,7 +390,6 @@ pub fn process_xadd(
         .collect();
 
     let stream_entry = StreamEntry {id: entity_id.clone(), fields: map_elements};
-    // map_elements.insert("id".to_string(), entity_id.clone());
     
     let mut map = kv_store.lock().unwrap();
 
@@ -395,10 +400,36 @@ pub fn process_xadd(
 
     match &mut entry.data {
         RedisData::Stream(stream) => {
-            stream.push(stream_entry);
-            // println!("{:?}", stream);
-            Ok(encode_bulk_string(&entity_id))
+            let is_valid = valid_entity_id(stream, &entity_id);
+            match is_valid {
+                true => {
+                    stream.push(stream_entry);
+                    Ok(encode_bulk_string(&entity_id))
+                },
+                false => Ok("-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".as_bytes().to_vec())
+            }        
         },
         _ => Err("WRONGTYPE Operation against a key that is not a stream".to_string())
     }
+}
+
+fn valid_entity_id(stream: &Vec<StreamEntry>, entity_id: &str) -> bool {
+    let (last_ms, last_seq): (u64, u64) = if let Some(last_entry) = stream.last() {
+        parse_entity_id(&last_entry.id)
+    } else {
+        (0, 0)
+    };
+    
+    let (new_ms, new_seq) = parse_entity_id(entity_id);
+    if (new_ms < last_ms) || (new_ms == last_ms && new_seq <= last_seq) {
+        return false;
+    }
+    true
+}
+
+fn parse_entity_id(entity_id: &str) -> (u64, u64){
+    let parts: Vec<&str> = entity_id.split('-').collect();
+    let ms = parts[0].parse::<u64>().unwrap_or(0);
+    let seq = parts[1].parse::<u64>().unwrap_or(0);
+    (ms, seq)
 }
