@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
 
-use crate::models::{ListPush, RedisData, RedisValue};
+use crate::models::{ListDir, RedisData, RedisValue};
 
 type RespResult = Result<Vec<u8>, String>;
 
@@ -15,10 +15,11 @@ pub fn parse_resp(buffer: &mut [u8], bytes_read: usize, kv_store: &Arc<Mutex<Has
         "ECHO" => process_echo(&parts),
         "SET" => process_set(&parts, &kv_store),
         "GET" => process_get(&parts, &kv_store),
-        "RPUSH" => process_push(&parts, &kv_store, ListPush::RPUSH),
+        "RPUSH" => process_push(&parts, &kv_store, ListDir::R),
         "LRANGE" => process_lrange(&parts, &kv_store),
-        "LPUSH" => process_push(&parts, &kv_store, ListPush::LPUSH),
+        "LPUSH" => process_push(&parts, &kv_store, ListDir::L),
         "LLEN" => process_llen(&parts, &kv_store),
+        "LPOP" => process_pop(&parts, &kv_store, ListDir::L),
         _ => Err("Not supported".to_string()),
     };
     match result {
@@ -98,9 +99,9 @@ fn process_get(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
     }
 }
 
-fn process_push(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, push_type: ListPush) -> RespResult {
+fn process_push(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, push_type: ListDir) -> RespResult {
     if parts.len() < 7 {
-        return Err("Incomplete RPUSH command".to_string());
+        return Err("Incomplete RPUSH/LPUSH command".to_string());
     }
     let key = parts[4].to_string();
     let mut map = kv_store.lock().unwrap();
@@ -120,8 +121,8 @@ fn process_push(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisVal
     match &mut entry.data {
         RedisData::List(list) => {
             match push_type {
-                ListPush::LPUSH => { list.splice(0..0, new_elements.into_iter().rev()); },
-                ListPush::RPUSH => { list.extend(new_elements); },
+                ListDir::L => { list.splice(0..0, new_elements.into_iter().rev()); },
+                ListDir::R => { list.extend(new_elements); },
             };
             // list.extend(new_elements);
             Ok(encode_integer(list.len())) 
@@ -185,6 +186,43 @@ fn process_llen(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisVal
         },
         None => Ok(encode_integer(0))
     }
+}
+
+fn process_pop(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, push_type: ListDir) -> RespResult {
+    if parts.len() < 5 {
+        return Err("Incomplete RPOP/LPOP command".to_string());
+    }
+    let key = parts[4].to_string();
+    let mut map = kv_store.lock().unwrap();
+    let mut should_remove = false;
+
+    let response = match map.get_mut(&key) {
+        Some(value) => {
+            match &mut value.data {
+                RedisData::List(list) => {
+                    if list.len() == 0 {
+                        Ok(encode_null_string())
+                    } else {
+                        let dropped_item = match push_type {
+                            ListDir::L => list.remove(0),
+                            ListDir::R => list.pop().unwrap()
+                        };
+                        if list.is_empty() {
+                            should_remove = true;
+                        }
+                        Ok(encode_bulk_string(&dropped_item))
+                    }
+                    
+                },
+                _ => Err("WRONGTYPE Operation against a key not holding a list".to_string()),
+            }
+        },
+        None => Ok(encode_null_string())
+    };
+    if should_remove {
+        map.remove(&key);
+    }
+    response
 }
 
 fn encode_simple_string(s: &str) -> Vec<u8> {

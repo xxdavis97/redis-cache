@@ -6,9 +6,10 @@ pub enum RedisData {
     // Future: Set(HashSet<String>), Hash(HashMap<String, String>)
 }
 
-pub enum ListPush {
-    LPUSH,
-    RPUSH
+// For RPUSH, LPUSH, RPOP, LPOP, etc. to get direction
+pub enum ListDir {
+    L,
+    R
 }
 
 pub struct RedisValue {
