@@ -340,7 +340,14 @@ async fn process_blpop(
         let duration = tokio::time::Duration::from_secs_f64(timeout_val);
         match tokio::time::timeout(duration, rx.recv()).await {
             Ok(maybe_data) => maybe_data, // Success or channel closed
-            Err(_) => None,               // Timeout
+            Err(_) => {
+                let mut room = waiting_room.lock().unwrap();
+                if let Some(queue) = room.get_mut(&key) {
+                    // Remove any senders that are closed (ours)
+                    queue.retain(|sender| !sender.is_closed());
+                }
+                None
+            },               // Timeout
         }
     } else {
         rx.recv().await
