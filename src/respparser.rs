@@ -192,6 +192,10 @@ fn process_pop(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
     if parts.len() < 5 {
         return Err("Incomplete RPOP/LPOP command".to_string());
     }
+    let mut delete_amt: i64 = 1;
+    if parts.len() == 7 {
+        delete_amt = parts[6].parse().unwrap_or(1);
+    }
     let key = parts[4].to_string();
     let mut map = kv_store.lock().unwrap();
     let mut should_remove = false;
@@ -203,14 +207,24 @@ fn process_pop(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
                     if list.len() == 0 {
                         Ok(encode_null_string())
                     } else {
-                        let dropped_item = match push_type {
-                            ListDir::L => list.remove(0),
-                            ListDir::R => list.pop().unwrap()
+                        let mut dropped_items = vec![];
+                        while delete_amt > 0 && list.len() > 0 {
+                            let dropped_item = match push_type {
+                                ListDir::L => list.remove(0),
+                                ListDir::R => list.pop().unwrap()
+                            };
+                            dropped_items.push(dropped_item);
+                            delete_amt -= 1;
                         };
+                        
                         if list.is_empty() {
                             should_remove = true;
                         }
-                        Ok(encode_bulk_string(&dropped_item))
+                        if dropped_items.len() > 1 {
+                            Ok(encode_array(&dropped_items))
+                        } else {
+                            Ok(encode_bulk_string(&dropped_items[0]))
+                        }       
                     }
                     
                 },
