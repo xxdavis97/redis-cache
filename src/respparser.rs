@@ -311,7 +311,7 @@ async fn process_blpop(
 
     let key = parts[4].to_string();
     println!("DEBUG: LBPOP checking kv_store for {}", key);
-    let timeout_val: u64 = parts[parts.len() - 1].parse().unwrap_or(0);
+    let timeout_val: f64 = parts[parts.len() - 1].parse().unwrap_or(0.0);
 
     // If exists just return, after check we want to remove the lock
     {
@@ -336,8 +336,9 @@ async fn process_blpop(
                  key, room.get(&key).unwrap().len());
     }
 
-    let result = if timeout_val > 0 {
-        match tokio::time::timeout(tokio::time::Duration::from_secs(timeout_val), rx.recv()).await {
+    let result = if timeout_val > 0.0 {
+        let duration = tokio::time::Duration::from_secs_f64(timeout_val);
+        match tokio::time::timeout(duration, rx.recv()).await {
             Ok(maybe_data) => maybe_data, // Success or channel closed
             Err(_) => None,               // Timeout
         }
