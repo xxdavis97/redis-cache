@@ -129,14 +129,22 @@ fn process_lrange(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisV
         return Err("Incomplete LRANGE command".to_string());
     }
     let key = parts[4].to_string();
-    let start: i64 = parts[6].parse().map_err(|_| "Invalid start index")?;
-    let end: i64 = parts[8].parse().map_err(|_| "Invalid end index")?;
+    // Mutable to allow for negative indices
+    let mut start: i64 = parts[6].parse().map_err(|_| "Invalid start index")?;
+    let mut end: i64 = parts[8].parse().map_err(|_| "Invalid end index")?;
 
     let map = kv_store.lock().unwrap();
     match map.get(&key) {
         Some(value) => {
             match &value.data {
                 RedisData::List(list) => {
+                    // Allow for negative indices
+                    if start < 0 {
+                        start = list.len() as i64 + start;
+                    }
+                    if end < 0 {
+                        end = list.len() as i64 + end;
+                    }
                     let start_idx = start.max(0) as usize;
                     let mut end_idx = end.max(0) as usize;
 
