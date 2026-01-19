@@ -18,6 +18,7 @@ pub fn parse_resp(buffer: &mut [u8], bytes_read: usize, kv_store: &Arc<Mutex<Has
         "RPUSH" => process_push(&parts, &kv_store, ListPush::RPUSH),
         "LRANGE" => process_lrange(&parts, &kv_store),
         "LPUSH" => process_push(&parts, &kv_store, ListPush::LPUSH),
+        "LLEN" => process_llen(&parts, &kv_store),
         _ => Err("Not supported".to_string()),
     };
     match result {
@@ -162,10 +163,27 @@ fn process_lrange(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisV
                     }
                     Ok(encode_array(&list[start_idx..end_idx]))
                 },
-                _ => Err("WRONGTYPE Operation against a key holding a string".to_string()),
+                _ => Err("WRONGTYPE Operation against a key not holding a list".to_string()),
             }
         },
         None => Ok(encode_array(&[]))
+    }
+}
+
+fn process_llen(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+    if parts.len() < 5 {
+        return Err("Incomplete LRANGE command".to_string());
+    }
+    let key = parts[4].to_string();
+    let map = kv_store.lock().unwrap();
+    match map.get(&key) {
+        Some(value) => {
+            match &value.data {
+                RedisData::List(list) => Ok(encode_integer(list.len())),
+                _ => Err("WRONGTYPE Operation against a key not holding a list".to_string()),
+            }
+        },
+        None => Ok(encode_integer(0))
     }
 }
 
