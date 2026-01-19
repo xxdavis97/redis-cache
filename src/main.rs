@@ -2,7 +2,10 @@
 use std::net::TcpListener;
 use std::io::{Read, Write};
 use std::thread;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 
+mod respparser;
 
 fn main() {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -11,12 +14,15 @@ fn main() {
     // Uncomment the code below to pass the first stage
     
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+
+    let env_variables = Arc::new(Mutex::new(HashMap::new()));
     
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                let kv_store = Arc::clone(&env_variables);
                 thread::spawn(move || { 
-                    handle_client(stream);
+                    handle_client(stream, kv_store);
                 });
             }
             Err(e) => eprintln!("Connection error: {}", e)
@@ -24,7 +30,7 @@ fn main() {
     }
 }
 
-fn handle_client(mut stream: std::net::TcpStream) {
+fn handle_client(mut stream: std::net::TcpStream, kv_store: Arc<Mutex<HashMap<String, String>>>) {
     let mut buffer = [0; 512];
     
     loop {
@@ -36,7 +42,7 @@ fn handle_client(mut stream: std::net::TcpStream) {
             }
             Ok(bytes_read) => {
                 println!("Received {} bytes", bytes_read);
-                let parsed_bytes = parse_resp(&mut buffer, bytes_read);
+                let parsed_bytes = respparser::parse_resp(&mut buffer, bytes_read, &kv_store);
                 if let Err(e) = stream.write_all(&parsed_bytes) {
                     eprintln!("Failed to write: {}", e);
                     break;
@@ -48,33 +54,4 @@ fn handle_client(mut stream: std::net::TcpStream) {
             }
         }
     }
-}
-
-fn parse_resp(buffer: &mut [u8], bytes_read: usize) -> Vec<u8> {
-    let data =  String::from_utf8_lossy(&buffer[..bytes_read]);
-    let parts: Vec<&str> = data.lines().collect();
-    let command = parts[2].to_uppercase();
-    match parts[2].to_uppercase().as_str() {
-        "PING" => encode_simple_string("PONG"),
-        "ECHO" => {
-            if parts.len() != 5 {
-                eprintln!("Error, echo command must be of length 5");
-                vec![]
-            } else {
-                encode_bulk_string(parts[4])
-            }
-        },
-        _ => {
-            eprintln!("Not supported resp command");
-            vec![]
-        }
-    }
-}
-
-fn encode_simple_string(s: &str) -> Vec<u8> {
-    format!("+{}\r\n", s).into_bytes()
-}
-
-fn encode_bulk_string(s: &str) -> Vec<u8> {
-    format!("${}\r\n{}\r\n", s.len(), s).into_bytes()
 }
