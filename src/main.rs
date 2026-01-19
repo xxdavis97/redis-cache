@@ -10,6 +10,8 @@ use crate::models::RedisValue;
 
 mod respparser;
 mod models;
+mod resputils;
+mod respcommands;
 
 #[tokio::main]
 async fn main() {
