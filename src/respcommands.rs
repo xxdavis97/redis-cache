@@ -3,7 +3,7 @@ use std::collections::{VecDeque, HashMap};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
-use crate::models::{ListDir, RedisData, RedisValue};
+use crate::models::{ListDir, RedisData, RedisValue, StreamEntry};
 use crate::resputils::*;
 
 pub fn process_ping() -> RespResult {
@@ -355,9 +355,50 @@ pub fn process_type(
         Ok(encode_simple_string("none"))
     } else {
         let val = map.get(&key).unwrap();
+        //todo: set, zset, hash, stream, vectorset
         match &val.data {
             RedisData::String(_s) => Ok(encode_simple_string("string")),
-            _ => Err("WRONGTYPE Operation against a key not holding a string".to_string()),
+            RedisData::List(_list) => Ok(encode_simple_string("list")),
+            RedisData::Stream(_stream) => Ok(encode_simple_string("stream")),
+            // _ => Err("WRONGTYPE Operation against unsupported type at key".to_string()),
         }
+    }
+}
+
+pub fn process_xadd(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> RespResult {
+    if parts.len() < 10 {
+        return Err("Malformed XADD".to_string());
+    }
+    let key = parts[4].to_string();
+    let entity_id = parts[6].to_string();
+
+    let map_elements: HashMap<String, String> = parts[8..]
+        .iter()
+        .step_by(2) // Skip the RESP length lines
+        .collect::<Vec<_>>() // Collect into references first (cheap)
+        .chunks_exact(2)
+        .map(|chunk| (chunk[0].to_string(), chunk[1].to_string()))
+        .collect();
+
+    let stream_entry = StreamEntry {id: entity_id.clone(), fields: map_elements};
+    // map_elements.insert("id".to_string(), entity_id.clone());
+    
+    let mut map = kv_store.lock().unwrap();
+
+    let entry = map.entry(key.clone()).or_insert(RedisValue::new(
+        RedisData::Stream(Vec::new()), 
+        None
+    ));
+
+    match &mut entry.data {
+        RedisData::Stream(stream) => {
+            stream.push(stream_entry);
+            // println!("{:?}", stream);
+            Ok(encode_bulk_string(&entity_id))
+        },
+        _ => Err("WRONGTYPE Operation against a key that is not a stream".to_string())
     }
 }

@@ -28,6 +28,7 @@ pub async fn parse_resp(
         "LPOP" => process_pop(&parts, &kv_store, ListDir::L),
         "BLPOP" => process_blpop(&parts, &kv_store, &waiting_room).await,
         "TYPE" => process_type(&parts, &kv_store),
+        "XADD" => process_xadd(&parts, &kv_store),
         _ => Err("Not supported".to_string()),
     };
     match result {

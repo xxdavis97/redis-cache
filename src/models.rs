@@ -1,9 +1,16 @@
 use std::time::Instant;
+use std::collections::HashMap;
 
 pub enum RedisData {
     String(String),
     List(Vec<String>),
+    Stream(Vec<StreamEntry>)
     // Future: Set(HashSet<String>), Hash(HashMap<String, String>)
+}
+
+pub struct StreamEntry {
+    pub id: String,
+    pub fields: HashMap<String, String>,
 }
 
 // For RPUSH, LPUSH, RPOP, LPOP, etc. to get direction
