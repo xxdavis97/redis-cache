@@ -6,6 +6,11 @@ pub enum RedisData {
     // Future: Set(HashSet<String>), Hash(HashMap<String, String>)
 }
 
+pub enum ListPush {
+    LPUSH,
+    RPUSH
+}
+
 pub struct RedisValue {
     pub data: RedisData,
     pub expires_at: Option<Instant>, // None means it never expires

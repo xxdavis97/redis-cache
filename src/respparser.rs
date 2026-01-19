@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
 
-use crate::models::{RedisData, RedisValue};
+use crate::models::{ListPush, RedisData, RedisValue};
 
 type RespResult = Result<Vec<u8>, String>;
 
@@ -15,8 +15,9 @@ pub fn parse_resp(buffer: &mut [u8], bytes_read: usize, kv_store: &Arc<Mutex<Has
         "ECHO" => process_echo(&parts),
         "SET" => process_set(&parts, &kv_store),
         "GET" => process_get(&parts, &kv_store),
-        "RPUSH" => process_rpush(&parts, &kv_store),
+        "RPUSH" => process_push(&parts, &kv_store, ListPush::RPUSH),
         "LRANGE" => process_lrange(&parts, &kv_store),
+        "LPUSH" => process_push(&parts, &kv_store, ListPush::LPUSH),
         _ => Err("Not supported".to_string()),
     };
     match result {
@@ -96,7 +97,7 @@ fn process_get(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValu
     }
 }
 
-fn process_rpush(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>) -> RespResult {
+fn process_push(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>, push_type: ListPush) -> RespResult {
     if parts.len() < 7 {
         return Err("Incomplete RPUSH command".to_string());
     }
@@ -117,8 +118,12 @@ fn process_rpush(parts: &Vec<&str>, kv_store: &Arc<Mutex<HashMap<String, RedisVa
 
     match &mut entry.data {
         RedisData::List(list) => {
-            list.extend(new_elements);
-            Ok(encode_integer(list.len())) // RPUSH returns the new length
+            match push_type {
+                ListPush::LPUSH => { list.splice(0..0, new_elements.into_iter().rev()); },
+                ListPush::RPUSH => { list.extend(new_elements); },
+            };
+            // list.extend(new_elements);
+            Ok(encode_integer(list.len())) 
         },
         _ => Err("WRONGTYPE Operation against a key that is not a list".to_string())
     }
