@@ -394,7 +394,6 @@ pub fn process_xadd(
 
     match &mut entry.data {
         RedisData::Stream(stream) => {
-            println!("HELLO");
             let (initial_ms, initial_seq) = parse_entity_id(&entity_id);
         
             // Handle sequence auto-generation if the ID was "1234-*"
@@ -436,6 +435,70 @@ pub fn process_xadd(
             }        
         },
         _ => Err("WRONGTYPE Operation against a key that is not a stream".to_string())
+    }
+}
+
+pub fn process_xrange(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> RespResult {
+    if parts.len() < 7 {
+        return Err("Malformed XRANGE".to_string());
+    }
+    let key = parts[4].to_string();
+    let start_raw = parts[6];
+    let end_raw = parts[8];
+
+    let start_bound = if start_raw == "-" {
+        (0, 0)
+    } else {
+        let (ms, seq) = parse_entity_id(start_raw);
+        // If user sent "1234" (no hyphen), parse_entity_id handles it as (1234, 0)
+        (ms, seq)
+    };
+
+    let end_bound = if end_raw == "+" {
+        (u64::MAX, u64::MAX)
+    } else {
+        let parts: Vec<&str> = end_raw.split('-').collect();
+        let ms = parts[0].parse::<u64>().unwrap_or(u64::MAX);
+        let seq = if parts.len() > 1 {
+            parts[1].parse::<u64>().unwrap_or(u64::MAX)
+        } else {
+            u64::MAX // If only "1234" is provided, we want the maximum sequence
+        };
+        (ms, seq)
+    };
+
+
+    let map = kv_store.lock().unwrap();
+    match map.get(&key) {
+        Some(entry) => match &entry.data {
+            RedisData::Stream(stream) => {
+                let mut entries_resp = Vec::new();
+
+                for entry in stream {
+                    let entry_id = parse_entity_id(&entry.id);
+                    if entry_id >= start_bound && entry_id <= end_bound {
+                    
+                        let mut fields_resp = Vec::new();
+                        for (k, v) in &entry.fields {
+                            fields_resp.push(encode_bulk_string(k));
+                            fields_resp.push(encode_bulk_string(v));
+                        }
+                        let encoded_fields = encode_raw_array(fields_resp);
+                        let mut entry_resp = Vec::new();
+                        entry_resp.push(encode_bulk_string(&entry.id));
+                        entry_resp.push(encoded_fields);
+                        
+                        entries_resp.push(encode_raw_array(entry_resp));
+                    }
+                }
+                Ok(encode_raw_array(entries_resp))
+            },
+            _ => Err("WRONGTYPE ...".to_string()),
+        },
+        None => Ok(encode_array(&[])), // Key doesn't exist
     }
 }
 

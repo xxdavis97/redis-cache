@@ -24,6 +24,14 @@ pub fn encode_array(arr: &[String]) -> Vec<u8> {
     bytes
 }
 
+pub fn encode_raw_array(parts: Vec<Vec<u8>>) -> Vec<u8> {
+    let mut response = format!("*{}\r\n", parts.len()).into_bytes();
+    for part in parts {
+        response.extend(part);
+    }
+    response
+}
+
 pub fn encode_null_array() -> Vec<u8> {
     "*-1\r\n".as_bytes().to_vec()
 }
