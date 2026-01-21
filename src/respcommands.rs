@@ -375,12 +375,6 @@ pub fn process_xadd(
     let key = parts[4].to_string();
     let entity_id = parts[6].to_string();
 
-    let (new_ms, new_seq) = parse_entity_id(&entity_id);
-
-    if new_ms == 0 && new_seq == 0 {
-        return Ok("-ERR The ID specified in XADD must be greater than 0-0\r\n".as_bytes().to_vec());
-}
-
     let map_elements: HashMap<String, String> = parts[8..]
         .iter()
         .step_by(2) // Skip the RESP length lines
@@ -400,11 +394,43 @@ pub fn process_xadd(
 
     match &mut entry.data {
         RedisData::Stream(stream) => {
-            let is_valid = valid_entity_id(stream, &entity_id);
+            println!("HELLO");
+            let (initial_ms, initial_seq) = parse_entity_id(&entity_id);
+        
+            // Handle sequence auto-generation if the ID was "1234-*"
+            let (new_ms, new_seq) = if parts[6].ends_with("-*") {
+                if let Some(last_entry) = stream.last() {
+                    let (last_ms, last_seq) = parse_entity_id(&last_entry.id);
+                    
+                    if initial_ms == last_ms {
+                        (initial_ms, last_seq + 1)
+                    } else if initial_ms == 0 {
+                        (initial_ms, 1)
+                    } else {
+                        (initial_ms, 0)
+                    }
+                } else {
+                    // Stream is empty
+                    let seq = if initial_ms == 0 { 1 } else { 0 };
+                    (initial_ms, seq)
+                }
+            } else {
+                // Not a wildcard, use the parsed values as-is
+                (initial_ms, initial_seq)
+            };
+
+            if new_ms == 0 && new_seq == 0 {
+                return Ok("-ERR The ID specified in XADD must be greater than 0-0\r\n".as_bytes().to_vec());
+            }
+
+            let resolved_id = format!("{}-{}", new_ms, new_seq);
+            println!("{} RESOLVED ID", resolved_id);
+
+            let is_valid = valid_entity_id(stream, &resolved_id);
             match is_valid {
                 true => {
                     stream.push(stream_entry);
-                    Ok(encode_bulk_string(&entity_id))
+                    Ok(encode_bulk_string(&resolved_id))
                 },
                 false => Ok("-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n".as_bytes().to_vec())
             }        
@@ -438,14 +464,14 @@ fn parse_entity_id(entity_id: &str) -> (u64, u64){
         parts[0].parse::<u64>().unwrap_or(0)
     };
     let seq = if parts.len() > 1 {
+        // We have a second part (the sequence)
         if parts[1] == "*" {
-            // We will need special logic for sequence auto-generation later!
-            0 
+            0 // Placeholder: actual auto-seq logic should happen in parent
         } else {
             parts[1].parse::<u64>().unwrap_or(0)
         }
     } else {
-        0
+        0 
     };
     (ms, seq)
 }
