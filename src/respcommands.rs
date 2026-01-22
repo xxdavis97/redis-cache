@@ -470,7 +470,6 @@ pub fn process_xrange(
         (ms, seq)
     };
 
-
     let map = kv_store.lock().unwrap();
     match map.get(&key) {
         Some(entry) => match &entry.data {
@@ -480,18 +479,7 @@ pub fn process_xrange(
                 for entry in stream {
                     let entry_id = parse_entity_id(&entry.id);
                     if entry_id >= start_bound && entry_id <= end_bound {
-                    
-                        let mut fields_resp = Vec::new();
-                        for (k, v) in &entry.fields {
-                            fields_resp.push(encode_bulk_string(k));
-                            fields_resp.push(encode_bulk_string(v));
-                        }
-                        let encoded_fields = encode_raw_array(fields_resp);
-                        let mut entry_resp = Vec::new();
-                        entry_resp.push(encode_bulk_string(&entry.id));
-                        entry_resp.push(encoded_fields);
-                        
-                        entries_resp.push(encode_raw_array(entry_resp));
+                        entries_resp.push(encode_stream_entry(&entry))
                     }
                 }
                 Ok(encode_raw_array(entries_resp))
@@ -500,6 +488,56 @@ pub fn process_xrange(
         },
         None => Ok(encode_array(&[])), // Key doesn't exist
     }
+}
+
+pub fn process_xread(
+    parts: &Vec<&str>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> RespResult {
+    if parts.len() < 7 {
+        return Err("Malformed XREAD".to_string());
+    }
+    let clean_parts: Vec<&str> = parts.iter()
+        .filter(|p| !p.starts_with('$') && !p.starts_with('*'))
+        .copied()
+        .collect();
+
+    let streams_idx = clean_parts.iter()
+        .position(|&r| r.to_uppercase() == "STREAMS")
+        .ok_or_else(|| "Missing STREAMS keyword".to_string())?;
+
+    let remaining = &clean_parts[streams_idx + 1..];
+    let num_streams = remaining.len() / 2;
+    let keys = &remaining[..num_streams];
+    let ids = &remaining[num_streams..];
+
+    let map = kv_store.lock().unwrap();
+    let mut result = Vec::new();
+    for i in 0..num_streams {
+        let key = keys[i];
+        let filter_id = parse_entity_id(ids[i]);
+        if let Some(RedisValue { data: RedisData::Stream(stream), .. }) = map.get(key) {
+            let mut results_for_stream: Vec<Vec<u8>> = Vec::new();
+            for entry in stream {
+                let entity_id_in_stream = parse_entity_id(&entry.id);
+                if entity_id_in_stream > filter_id {
+                    results_for_stream.push(encode_stream_entry(&entry));
+                }
+            }
+            if !results_for_stream.is_empty() {
+                let stream_result = vec![
+                    encode_bulk_string(key),
+                    encode_raw_array(results_for_stream)
+                ];
+                result.push(encode_raw_array(stream_result));
+            }
+        }
+    }
+    if result.is_empty() {
+        Ok(encode_null_string())
+    } else {
+        Ok(encode_raw_array(result))
+    }   
 }
 
 fn valid_entity_id(stream: &Vec<StreamEntry>, entity_id: &str) -> bool {

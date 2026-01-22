@@ -30,6 +30,7 @@ pub async fn parse_resp(
         "TYPE" => process_type(&parts, &kv_store),
         "XADD" => process_xadd(&parts, &kv_store),
         "XRANGE" => process_xrange(&parts, &kv_store),
+        "XREAD" => process_xread(&parts, &kv_store),
         _ => Err("Not supported".to_string()),
     };
     match result {

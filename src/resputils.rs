@@ -1,3 +1,5 @@
+use crate::models::StreamEntry;
+
 pub type RespResult = Result<Vec<u8>, String>;
 
 pub fn encode_simple_string(s: &str) -> Vec<u8> {
@@ -30,6 +32,19 @@ pub fn encode_raw_array(parts: Vec<Vec<u8>>) -> Vec<u8> {
         response.extend(part);
     }
     response
+}
+
+pub fn encode_stream_entry(entry: &StreamEntry) -> Vec<u8> {
+    let mut fields_resp = Vec::new();
+    for (k, v) in &entry.fields {
+        fields_resp.push(encode_bulk_string(k));
+        fields_resp.push(encode_bulk_string(v));
+    }
+    let encoded_fields = encode_raw_array(fields_resp);
+    let mut entry_resp = Vec::new();
+    entry_resp.push(encode_bulk_string(&entry.id));
+    entry_resp.push(encoded_fields);
+    encode_raw_array(entry_resp)
 }
 
 pub fn encode_null_array() -> Vec<u8> {
