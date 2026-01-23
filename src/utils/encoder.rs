@@ -1,7 +1,5 @@
 use crate::models::StreamEntry;
 
-pub type RespResult = Result<Vec<u8>, String>;
-
 pub fn encode_simple_string(s: &str) -> Vec<u8> {
     format!("+{}\r\n", s).into_bytes()
 }

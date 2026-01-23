@@ -40,6 +40,27 @@ pub fn process_incr(
 pub fn process_multi(
     command_queue: &mut Option<VecDeque<Vec<String>>>
 ) -> RespResult {
+    if command_queue.is_some() {
+        return Ok(b"-ERR MULTI calls can not be nested\r\n".to_vec());
+    }
     *command_queue = Some(VecDeque::new());
     Ok(encode_simple_string("OK"))
+}
+
+pub fn process_exec(
+    command_queue: &mut Option<VecDeque<Vec<String>>>
+) -> RespResult {
+    if command_queue.is_none() {
+        // todo: have encode_error_string
+        return Ok(b"-ERR EXEC without MULTI\r\n".to_vec());
+    }
+    return Ok(encode_simple_string("Hello"));
+}
+
+pub fn handle_push_command_queue(
+    parts: &[String],
+    command_queue: &mut VecDeque<Vec<String>>
+) -> RespResult {
+    command_queue.push_back(parts.to_vec());
+    Ok(encode_simple_string("QUEUED"))
 }

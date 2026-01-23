@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::{VecDeque, HashMap};
 use tokio::sync::mpsc;
 
-use crate::models::{ListDir, RedisData, RedisValue};
+use crate::models::{ListDir, RedisData, RedisValue, RespResult};
 use crate::utils::async_helpers::*;
 use crate::utils::encoder::*;
 

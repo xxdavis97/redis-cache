@@ -1,6 +1,8 @@
 use std::time::Instant;
 use std::collections::HashMap;
 
+pub type RespResult = Result<Vec<u8>, String>;
+
 pub enum RedisData {
     String(String),
     List(Vec<String>),
