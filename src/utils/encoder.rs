@@ -47,3 +47,7 @@ pub fn encode_stream_entry(entry: &StreamEntry) -> Vec<u8> {
 pub fn encode_null_array() -> Vec<u8> {
     "*-1\r\n".as_bytes().to_vec()
 }
+
+pub fn encode_error_string(s: &str) -> Vec<u8> {
+    format!("-{}\r\n", s).into_bytes()
+}

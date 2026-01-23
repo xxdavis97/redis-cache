@@ -24,10 +24,10 @@ pub fn process_incr(
                         *item = new_num.to_string(); 
                         Ok(encode_integer(new_num))
                     } else {
-                        Ok(b"-ERR value is not an integer or out of range\r\n".to_vec())
+                        Ok(encode_error_string("ERR value is not an integer or out of range"))
                     }
                 },
-                _ => Ok(b"-WRONGTYPE Operation against a key not holding a string\r\n".to_vec()),
+                _ => Ok(encode_error_string("WRONGTYPE Operation against a key not holding a string")),
             }
         },
         None => {
@@ -41,7 +41,7 @@ pub fn process_multi(
     command_queue: &mut Option<VecDeque<Vec<String>>>
 ) -> RespResult {
     if command_queue.is_some() {
-        return Ok(b"-ERR MULTI calls can not be nested\r\n".to_vec());
+        return Ok(encode_error_string("ERR MULTI calls can not be nested"));
     }
     *command_queue = Some(VecDeque::new());
     Ok(encode_simple_string("OK"))
@@ -51,9 +51,22 @@ pub fn process_exec(
     command_queue: &mut Option<VecDeque<Vec<String>>>
 ) -> RespResult {
     if command_queue.is_none() {
-        // todo: have encode_error_string
-        return Ok(b"-ERR EXEC without MULTI\r\n".to_vec());
+        return Ok(encode_error_string("ERR EXEC without MULTI"));
     }
+    // Don't need none check as covered above
+    let queue = command_queue.as_mut().unwrap();
+    if queue.is_empty() {
+        // EXEC should cancel the multi command, make command_queue None
+        *command_queue = None;
+        return Ok(encode_array(&vec![]));
+    }
+    // while let front_command = queue.front() {
+    //     execute_commands()
+    //     queue.pop_front();
+    // }
+
+    //todo: fix to actually run the commands, should probably just call parser (be careful this is 
+    // then recursive and needs the other args)
     return Ok(encode_simple_string("Hello"));
 }
 

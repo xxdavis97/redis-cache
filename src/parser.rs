@@ -23,6 +23,7 @@ pub async fn parse_resp(
     }
     let command = parts[0].to_uppercase();
 
+    // If multi is active, push all commands onto queue and return unless command is exec or discard
     if let Some(queue) = command_queue {
         match command.as_str() {
             "EXEC" | "DISCARD" => {},
@@ -32,7 +33,16 @@ pub async fn parse_resp(
             }
         }
     }
+    execute_commands(command, &parts, &kv_store, &waiting_room, command_queue).await
+}
 
+pub async fn execute_commands(
+    command: String,
+    parts: &Vec<String>, 
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
+    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
+    command_queue: &mut Option<VecDeque<Vec<String>>>
+) -> Vec<u8> {
     let result = match command.as_str() {
         "PING" => process_ping(),
         "ECHO" => process_echo(&parts),
