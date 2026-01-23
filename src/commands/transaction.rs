@@ -1,7 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
+use async_recursion::async_recursion;
 use crate::utils::encoder::*;
 use crate::models::*;
+use crate::executor::*;
 
 pub fn process_incr(
     parts: &[String],
@@ -47,27 +50,31 @@ pub fn process_multi(
     Ok(encode_simple_string("OK"))
 }
 
-pub fn process_exec(
-    command_queue: &mut Option<VecDeque<Vec<String>>>
+#[async_recursion]
+pub async fn process_exec(
+    command_queue: &mut Option<VecDeque<Vec<String>>>,
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
+    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
 ) -> RespResult {
-    if command_queue.is_none() {
-        return Ok(encode_error_string("ERR EXEC without MULTI"));
-    }
-    // Don't need none check as covered above
-    let queue = command_queue.as_mut().unwrap();
+    let queue = match command_queue.take() {
+        Some(q) => q,
+        None => return Ok(encode_error_string("ERR EXEC without MULTI")),
+    };
     if queue.is_empty() {
-        // EXEC should cancel the multi command, make command_queue None
-        *command_queue = None;
         return Ok(encode_array(&vec![]));
     }
-    // while let front_command = queue.front() {
-    //     execute_commands()
-    //     queue.pop_front();
-    // }
-
-    //todo: fix to actually run the commands, should probably just call parser (be careful this is 
-    // then recursive and needs the other args)
-    return Ok(encode_simple_string("Hello"));
+    let mut responses: Vec<Vec<u8>> = Vec::new();
+    for parts in queue {
+        let command_result = execute_commands(
+            parts[0].to_uppercase(), 
+            &parts, 
+            kv_store, 
+            waiting_room, 
+            &mut None // MULTI/EXEC can't be nested so null command queue
+        ).await;
+        responses.push(command_result);
+    }
+    Ok(encode_raw_array(responses))
 }
 
 pub fn handle_push_command_queue(
