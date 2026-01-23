@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::collections::{HashMap, VecDeque};
 use tokio::sync::mpsc;
 
-use codecrafters_redis::models::RedisValue;
-use codecrafters_redis::parser;
+use redis_cache::models::RedisValue;
+use redis_cache::parser;
 
 #[tokio::main]
 async fn main() {
