@@ -120,8 +120,11 @@ pub async fn process_xread(
     let keys = &remaining[..num_streams];
     let ids = &remaining[num_streams..];
 
+    // handle dollar sign inputs
+    let effective_ids = get_effective_ids_for_xread(&keys, &ids, &kv_store);
+
     // Try to read stream immediately 
-    let mut result = perform_xread(&keys, &ids, &kv_store);
+    let mut result = perform_xread(&keys, &effective_ids, &kv_store);
 
     if !result.is_empty() {
         return Ok(encode_raw_array(result));
@@ -136,7 +139,7 @@ pub async fn process_xread(
             rx.recv().await;
         }
         // Wake up and try to read again (Second pass)
-        result = perform_xread(&keys, &ids, &kv_store);
+        result = perform_xread(&keys, &effective_ids, &kv_store);
     }
 
     if result.is_empty() {
@@ -144,6 +147,34 @@ pub async fn process_xread(
     } else {
         Ok(encode_raw_array(result))
     }
+}
+
+fn get_effective_ids_for_xread(
+    keys: &[String],
+    ids: &[String],
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>
+) -> Vec<String> {
+    let mut effective_ids = ids.to_vec();
+    // scope the map lock
+    {
+        let map = kv_store.lock().unwrap();
+        for i in 0..keys.len() {
+            if ids[i] == "$" {
+                if let Some(RedisValue { data: RedisData::Stream(stream), .. }) = map.get(&keys[i]) {
+                    // If the stream exists, $ becomes the last ID currently in it
+                    if let Some(last_entry) = stream.last() {
+                        effective_ids[i] = last_entry.id.clone();
+                    } else {
+                        effective_ids[i] = "0-0".to_string();
+                    }
+                } else {
+                    // If key doesn't exist, $ is effectively 0-0
+                    effective_ids[i] = "0-0".to_string();
+                }
+            }
+        }
+    }
+    effective_ids
 }
 
 fn perform_xread(
