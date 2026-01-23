@@ -1,17 +1,12 @@
 #![allow(unused_imports)]
-use tokio::net::{TcpListener, TcpStream}; // Use tokio networking
+use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use std::thread;
 use std::sync::{Arc, Mutex};
 use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
 use tokio::sync::mpsc;
-use crate::models::RedisValue;
 
-mod respparser;
-mod models;
-mod resputils;
-mod respcommands;
+use codecrafters_redis::models::RedisValue;
+use codecrafters_redis::parser;
 
 #[tokio::main]
 async fn main() {
@@ -52,7 +47,7 @@ async fn handle_client(mut stream: tokio::net::TcpStream, kv_store: Arc<Mutex<Ha
             }
             Ok(bytes_read) => {
                 println!("Received {} bytes", bytes_read);
-                let parsed_bytes = respparser::parse_resp(&mut buffer, bytes_read, &kv_store, &waiting_room).await;
+                let parsed_bytes = parser::parse_resp(&mut buffer, bytes_read, &kv_store, &waiting_room).await;
                 if let Err(e) = stream.write_all(&parsed_bytes).await {
                     eprintln!("Failed to write: {}", e);
                     break;

@@ -1,4 +1,4 @@
-pub mod respparser;
+pub mod parser;
 pub mod models;
-pub mod resputils;
-pub mod respcommands;
+pub mod commands;
+pub mod utils;
