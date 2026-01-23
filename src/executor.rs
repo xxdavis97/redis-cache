@@ -32,6 +32,7 @@ pub async fn execute_commands(
         "INCR" => process_incr(&parts, &kv_store),
         "MULTI" => process_multi(command_queue),
         "EXEC" => process_exec(command_queue, &kv_store, &waiting_room).await,
+        "DISCARD" => process_discard(command_queue),
         _ => Err("Not supported".to_string()),
     };
     match_result(result)

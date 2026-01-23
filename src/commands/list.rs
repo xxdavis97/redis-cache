@@ -35,17 +35,21 @@ pub fn process_push(
 
             if let Some(queue) = room.get_mut(&key) {
                 println!("DEBUG: PUSH found {} waiters for {}", queue.len(), key);
-                while let Some(tx) = queue.front() {
+                // First, clean up any dead waiters
+                queue.retain(|sender| !sender.is_closed());
+                println!("DEBUG: PUSH after cleanup: {} live waiters for {}", queue.len(), key);
+
+                while let Some(tx) = queue.pop_front() {
                     let Some(next_val) = remaining_elements.next() else {
                         println!("DEBUG: PUSH ran out of elements for waiters");
                         break;
                     };
-                    if tx.try_send(next_val).is_ok() {
+                    if tx.try_send(next_val.clone()).is_ok() {
                         println!("DEBUG: PUSH successfully handed off element");
-                        queue.pop_front();
                     } else {
-                        println!("DEBUG: PUSH found a dead waiter (receiver dropped)");
-                        queue.pop_front();
+                        // Send failed, put element back for next waiter or list
+                        println!("DEBUG: PUSH send failed, will retry with element");
+                        remaining_elements = std::iter::once(next_val).chain(remaining_elements).collect::<Vec<_>>().into_iter();
                     }
                 }
             } else {

@@ -77,6 +77,15 @@ pub async fn process_exec(
     Ok(encode_raw_array(responses))
 }
 
+pub fn process_discard(
+    command_queue: &mut Option<VecDeque<Vec<String>>>,
+) -> RespResult {
+    match command_queue.take() {
+        Some(_) => Ok(encode_simple_string("OK")),
+        None => Ok(encode_error_string("ERR DISCARD without MULTI"))
+    }
+}
+
 pub fn handle_push_command_queue(
     parts: &[String],
     command_queue: &mut VecDeque<Vec<String>>
@@ -84,3 +93,4 @@ pub fn handle_push_command_queue(
     command_queue.push_back(parts.to_vec());
     Ok(encode_simple_string("QUEUED"))
 }
+
