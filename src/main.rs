@@ -34,29 +34,48 @@ async fn main() {
     }
 }
 
-async fn handle_client(mut stream: tokio::net::TcpStream, kv_store: Arc<Mutex<HashMap<String, RedisValue>>>, 
-                    waiting_room: Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>) {
+async fn handle_client(
+    mut stream: tokio::net::TcpStream, 
+    kv_store: Arc<Mutex<HashMap<String, RedisValue>>>,           
+    waiting_room: Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>
+) {
     let mut buffer = [0; 512];
-    
+    // For MULTI will keep track of pending commands by client, None
+    // should signal MULTI is not on
+    let mut command_queue: Option<VecDeque<Vec<String>>> = None;
     loop {
-        match stream.read(&mut buffer).await {
-            Ok(0) => {
-                // Client disconnected (EOF)
-                println!("Client disconnected");
-                break;
-            }
-            Ok(bytes_read) => {
-                println!("Received {} bytes", bytes_read);
-                let parsed_bytes = parser::parse_resp(&mut buffer, bytes_read, &kv_store, &waiting_room).await;
-                if let Err(e) = stream.write_all(&parsed_bytes).await {
-                    eprintln!("Failed to write: {}", e);
-                    break;
-                }
-            }
+        match run_command(&mut stream, &mut buffer, &kv_store, &waiting_room, &mut command_queue).await {
+            Ok(alive) if !alive => break, // EOF reached
+            Ok(_) => (),                 // Command handled, keep going
             Err(e) => {
-                eprintln!("Failed to read: {}", e);
+                eprintln!("Connection error: {}", e);
                 break;
             }
         }
+        
     }
+}
+
+async fn run_command(
+    stream: &mut tokio::net::TcpStream, // Use &mut here
+    buffer: &mut [u8],
+    kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,           
+    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
+    command_queue: &mut Option<VecDeque<Vec<String>>> // Mutable ref to the state
+) -> Result<bool, Box<dyn std::error::Error>> {
+    match stream.read(buffer).await? {
+        0 => return Ok(false), // Signal disconnect
+        bytes_read => {
+            let parsed_bytes = parser::parse_resp(
+                buffer, 
+                bytes_read, 
+                kv_store, 
+                waiting_room, 
+                command_queue
+            ).await;
+            
+            stream.write_all(&parsed_bytes).await?;
+            Ok(true) // Keep loop alive
+        }
+    }   
 }

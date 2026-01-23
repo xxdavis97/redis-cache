@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use crate::utils::encoder::*;
 use crate::models::*;
@@ -35,4 +35,11 @@ pub fn process_incr(
             Ok(encode_integer(1))
         },
     }
+}
+
+pub fn process_multi(
+    command_queue: &mut Option<VecDeque<Vec<String>>>
+) -> RespResult {
+    *command_queue = Some(VecDeque::new());
+    Ok(encode_simple_string("OK"))
 }

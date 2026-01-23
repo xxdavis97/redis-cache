@@ -10,7 +10,8 @@ pub async fn parse_resp(
     buffer: &mut [u8],
     bytes_read: usize,
     kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
-    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>
+    waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
+    command_queue: &mut Option<VecDeque<Vec<String>>>
 ) -> Vec<u8> {
 
     let data = String::from_utf8_lossy(&buffer[..bytes_read]);
@@ -37,6 +38,7 @@ pub async fn parse_resp(
         "XRANGE" => process_xrange(&parts, &kv_store),
         "XREAD" => process_xread(&parts, &kv_store, &waiting_room).await,
         "INCR" => process_incr(&parts, &kv_store),
+        "MULTI" => process_multi(command_queue),
         _ => Err("Not supported".to_string()),
     };
     match result {

@@ -229,7 +229,8 @@ pub async fn process_blpop(
                 if let Some(queue) = room.get_mut(&key) {
                     queue.retain(|sender| !sender.is_closed());
                 }
-                None
+                // One last look to check if data was sent during the timeout transition
+                rx.try_recv().ok()
             },
         }
     } else {
