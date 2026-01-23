@@ -36,6 +36,7 @@ pub async fn parse_resp(
         "XADD" => process_xadd(&parts, &kv_store, &waiting_room),
         "XRANGE" => process_xrange(&parts, &kv_store),
         "XREAD" => process_xread(&parts, &kv_store, &waiting_room).await,
+        "INCR" => process_incr(&parts, &kv_store),
         _ => Err("Not supported".to_string()),
     };
     match result {

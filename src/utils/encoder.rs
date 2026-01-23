@@ -14,10 +14,9 @@ pub fn encode_null_string() -> Vec<u8> {
     "$-1\r\n".as_bytes().to_vec()
 }
 
-pub fn encode_integer(n: usize) -> Vec<u8> {
+pub fn encode_integer(n: i64) -> Vec<u8> {
     format!(":{}\r\n", n).into_bytes()
 }
-
 pub fn encode_array(arr: &[String]) -> Vec<u8> {
     let mut bytes = format!("*{}\r\n", arr.len()).into_bytes();
     for s in arr {

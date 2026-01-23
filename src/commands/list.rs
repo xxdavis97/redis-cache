@@ -62,7 +62,7 @@ pub fn process_push(
             }
 
             let final_len = list.len() + (total_new_elements - leftovers_count);
-            Ok(encode_integer(final_len))
+            Ok(encode_integer(final_len as i64))
         },
         _ => Err("WRONGTYPE Operation against a key that is not a list".to_string())
     }
@@ -123,7 +123,7 @@ pub fn process_llen(
     match map.get(key) {
         Some(value) => {
             match &value.data {
-                RedisData::List(list) => Ok(encode_integer(list.len())),
+                RedisData::List(list) => Ok(encode_integer(list.len() as i64)),
                 _ => Err("WRONGTYPE Operation against a key not holding a list".to_string()),
             }
         },
