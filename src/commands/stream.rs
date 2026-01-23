@@ -129,10 +129,12 @@ pub async fn process_xread(
 
     if let Some(timeout_val) = block_ms {
         let (_tx, mut rx) = init_waiting_room(&keys, &waiting_room);
-
-        let duration = tokio::time::Duration::from_millis(timeout_val as u64);
-        let _ = tokio::time::timeout(duration, rx.recv()).await;
-
+        if timeout_val > 0.0 {
+            let duration = tokio::time::Duration::from_millis(timeout_val as u64);
+            let _ = tokio::time::timeout(duration, rx.recv()).await;
+        } else {
+            rx.recv().await;
+        }
         // Wake up and try to read again (Second pass)
         result = perform_xread(&keys, &ids, &kv_store);
     }
