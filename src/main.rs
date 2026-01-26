@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use std::env;
 use tokio::sync::mpsc;
 
-use redis_cache::models::RedisValue;
+use redis_cache::models::{ServerInfo, ReplicationInfo, RedisValue};
 use redis_cache::parser;
 use redis_cache::constants::*;
 
@@ -49,8 +49,10 @@ async fn handle_client(
     // For MULTI will keep track of pending commands by client, None
     // should signal MULTI is not on
     let mut command_queue: Option<VecDeque<Vec<String>>> = None;
+    //todo: update for more info
+    let mut server_info: ServerInfo = ServerInfo{replication_info: ReplicationInfo::new("master".to_string())};
     loop {
-        match run_command(&mut stream, &mut buffer, &kv_store, &waiting_room, &mut command_queue).await {
+        match run_command(&mut stream, &mut buffer, &kv_store, &waiting_room, &mut command_queue, &mut server_info).await {
             Ok(alive) if !alive => break, // EOF reached
             Ok(_) => (),                 // Command handled, keep going
             Err(e) => {
@@ -67,7 +69,8 @@ async fn run_command(
     buffer: &mut [u8],
     kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,           
     waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
-    command_queue: &mut Option<VecDeque<Vec<String>>> // Mutable ref to the state
+    command_queue: &mut Option<VecDeque<Vec<String>>>, // Mutable ref to the state
+    server_info: &mut ServerInfo
 ) -> Result<bool, Box<dyn std::error::Error>> {
     match stream.read(buffer).await? {
         0 => return Ok(false), // Signal disconnect
@@ -77,7 +80,8 @@ async fn run_command(
                 bytes_read, 
                 kv_store, 
                 waiting_room, 
-                command_queue
+                command_queue,
+                server_info
             ).await;
             
             stream.write_all(&parsed_bytes).await?;

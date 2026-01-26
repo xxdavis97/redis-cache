@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::collections::{VecDeque, HashMap};
 use tokio::sync::mpsc;
 
-use crate::models::{RedisValue};
+use crate::models::{ServerInfo, RedisValue};
 use crate::commands::*;
 use crate::utils::decoder::decode_resp;
 use crate::executor::*;
@@ -12,7 +12,8 @@ pub async fn parse_resp(
     bytes_read: usize,
     kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
     waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
-    command_queue: &mut Option<VecDeque<Vec<String>>>
+    command_queue: &mut Option<VecDeque<Vec<String>>>,
+    server_info: &mut ServerInfo
 ) -> Vec<u8> {
 
     let data = String::from_utf8_lossy(&buffer[..bytes_read]);
@@ -34,7 +35,7 @@ pub async fn parse_resp(
             }
         }
     }
-    execute_commands(command, &parts, &kv_store, &waiting_room, command_queue).await
+    execute_commands(command, &parts, &kv_store, &waiting_room, command_queue, server_info).await
 }
 
 

@@ -55,6 +55,7 @@ pub async fn process_exec(
     command_queue: &mut Option<VecDeque<Vec<String>>>,
     kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
     waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
+    server_info: &mut ServerInfo
 ) -> RespResult {
     let queue = match command_queue.take() {
         Some(q) => q,
@@ -70,7 +71,8 @@ pub async fn process_exec(
             &parts, 
             kv_store, 
             waiting_room, 
-            &mut None // MULTI/EXEC can't be nested so null command queue
+            &mut None, // MULTI/EXEC can't be nested so null command queue
+            server_info
         ).await;
         responses.push(command_result);
     }

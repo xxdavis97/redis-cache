@@ -3,7 +3,7 @@ use std::collections::{VecDeque, HashMap};
 use tokio::sync::mpsc;
 use async_recursion::async_recursion;
 
-use crate::models::{ListDir, RedisValue, RespResult};
+use crate::models::{ListDir, ServerInfo, RedisValue, RespResult};
 use crate::commands::*;
 
 #[async_recursion]
@@ -12,7 +12,8 @@ pub async fn execute_commands(
     parts: &Vec<String>, 
     kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
     waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
-    command_queue: &mut Option<VecDeque<Vec<String>>>
+    command_queue: &mut Option<VecDeque<Vec<String>>>,
+    server_info: &mut ServerInfo
 ) -> Vec<u8> {
     let result = match command.as_str() {
         "PING" => process_ping(),
@@ -31,8 +32,9 @@ pub async fn execute_commands(
         "XREAD" => process_xread(&parts, &kv_store, &waiting_room).await,
         "INCR" => process_incr(&parts, &kv_store),
         "MULTI" => process_multi(command_queue),
-        "EXEC" => process_exec(command_queue, &kv_store, &waiting_room).await,
+        "EXEC" => process_exec(command_queue, &kv_store, &waiting_room, server_info).await,
         "DISCARD" => process_discard(command_queue),
+        "INFO" => process_info(&parts, server_info),
         _ => Err("Not supported".to_string()),
     };
     match_result(result)
