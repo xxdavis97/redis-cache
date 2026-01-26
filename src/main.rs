@@ -3,10 +3,12 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use std::sync::{Arc, Mutex};
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use tokio::sync::mpsc;
 
 use redis_cache::models::RedisValue;
 use redis_cache::parser;
+use redis_cache::constants::*;
 
 #[tokio::main]
 async fn main() {
@@ -14,8 +16,12 @@ async fn main() {
     println!("Logs from your program will appear here!");
 
     // Uncomment the code below to pass the first stage
+    let args: Vec<String> = env::args().collect();
+    let port_num = args.iter()
+        .position(|arg| arg == PORT)
+        .map_or("6379", |idx| &args[idx+1]);
     
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port_num)).await.unwrap();
 
     let store = Arc::new(Mutex::new(HashMap::new()));
     let waiting_room: Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>> = Arc::new(Mutex::new(HashMap::new()));
