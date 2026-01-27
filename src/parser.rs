@@ -13,7 +13,7 @@ pub async fn parse_resp(
     kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
     waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
     command_queue: &mut Option<VecDeque<Vec<String>>>,
-    server_info: &mut ServerInfo
+    server_info: &Arc<Mutex<ServerInfo>>
 ) -> Vec<u8> {
 
     let data = String::from_utf8_lossy(&buffer[..bytes_read]);
@@ -35,7 +35,7 @@ pub async fn parse_resp(
             }
         }
     }
-    execute_commands(command, &parts, &kv_store, &waiting_room, command_queue, server_info).await
+    execute_commands(command, &parts, &kv_store, &waiting_room, command_queue, &server_info).await
 }
 
 

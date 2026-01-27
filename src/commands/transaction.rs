@@ -55,7 +55,7 @@ pub async fn process_exec(
     command_queue: &mut Option<VecDeque<Vec<String>>>,
     kv_store: &Arc<Mutex<HashMap<String, RedisValue>>>,
     waiting_room: &Arc<Mutex<HashMap<String, VecDeque<mpsc::Sender<String>>>>>,
-    server_info: &mut ServerInfo
+    server_info: &Arc<Mutex<ServerInfo>>
 ) -> RespResult {
     let queue = match command_queue.take() {
         Some(q) => q,

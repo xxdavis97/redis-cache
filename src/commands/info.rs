@@ -1,10 +1,11 @@
 
+use std::sync::{Arc, Mutex};
 use crate::models::{InfoOption, ServerInfo, RespResult};
 use crate::utils::encoder::encode_bulk_string;
 
 pub fn process_info(
     parts: &[String],
-    server_info: &ServerInfo
+    server_info: &Arc<Mutex<ServerInfo>>
 ) -> RespResult {
     // Don't need length check because can only pass INFO 
     let mut info_option: Option<InfoOption> = None;
@@ -17,9 +18,11 @@ pub fn process_info(
         }
     }
 
+    let info = server_info.lock().unwrap();
+
     match info_option {
         //todo: make work for all infooption since all can implement the string
-        Some(InfoOption::Replication) => Ok(encode_bulk_string(&server_info.replication_info.to_info_string())), 
-        None => Ok(encode_bulk_string(&server_info.replication_info.to_info_string())) //todo: update
+        Some(InfoOption::Replication) => Ok(encode_bulk_string(&info.replication_info.to_info_string())), 
+        None => Ok(encode_bulk_string(&info.replication_info.to_info_string())) //todo: update
     }
 }
